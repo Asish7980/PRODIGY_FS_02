@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Employment Management System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f2f2f2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      width: 300px;
+      margin-bottom: 20px;
+    }
+
+    input,
+    button {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+    }
+
+    #employeeForm {
+      display: none;
+    }
+
+    #employeeSection {
+      display: none;
+      width: 100%;
+      max-width: 1000px;
+    }
+
+    #searchInput {
+      display: none;
+      width: 300px;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    th {
+      background-color: #eee;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 5px;
+    }
+
+    .pagination {
+      margin-top: 10px;
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .pagination button {
+      padding: 5px 10px;
+    }
+
+    #summary {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+
+    #csvExport {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+    <h2>Admin Login</h2>
+    <input type="text" id="username" placeholder="Username" />
+    <input type="password" id="password" placeholder="Password" />
+    <button onclick="login()">Login</button>
+
+    <form id="employeeForm">
+      <h3>Add / Edit Employee</h3>
+      <input type="text" id="name" placeholder="Name" required />
+      <input type="email" id="email" placeholder="Email" required />
+      <input type="text" id="position" placeholder="Position" required />
+      <input type="number" id="salary" placeholder="Salary" required />
+      <button type="button" onclick="addEmployee()">Save</button>
+    </form>
+  </div>
+
+  <input type="text" id="searchInput" placeholder="Search employees..." />
+
+  <div id="employeeSection">
+    <h3>Employee List</h3>
+    <button id="csvExport" onclick="exportToCSV()">Export to CSV</button>
+    <table id="employeeTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Position</th>
+          <th>Salary</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="summary"></div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <script>
+    let token = "";
+    let editingId = null;
+    let allEmployees = [];
+    let currentPage = 1;
+    const rowsPerPage = 5;
+
+    async function login() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value.trim();
+
+      const response = await fetch("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await response.json();
+
+      if (data.token) {
+        token = data.token;
+        alert("Login successful!");
+        document.getElementById("employeeForm").style.display = "block";
+        document.getElementById("employeeSection").style.display = "block";
+        document.getElementById("searchInput").style.display = "block";
+        await fetchEmployees();
+      } else {
+        alert("Login failed: " + (data.message || "Invalid credentials"));
+      }
+    }
+
+    async function addEmployee() {
+      const name = document.getElementById("name").value;
+      const email = document.getElementById("email").value;
+      const position = document.getElementById("position").value;
+      const salary = document.getElementById("salary").value;
+
+      const url = editingId
+        ? `http://localhost:3000/api/employees/${editingId}`
+        : "http://localhost:3000/api/employees";
+
+      const method = editingId ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ name, email, position, salary })
+      });
+
+      const result = await response.json();
+      alert(result.message || (editingId ? "Updated" : "Added") + " successfully");
+
+      editingId = null;
+      document.getElementById("employeeForm").reset();
+      await fetchEmployees();
+    }
+
+    async function fetchEmployees() {
+      const response = await fetch("http://localhost:3000/api/employees", {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+      allEmployees = data;
+      currentPage = 1;
+      displayPage();
+    }
+
+    function displayPage() {
+      const tbody = document.querySelector("#employeeTable tbody");
+      tbody.innerHTML = "";
+
+      const searchValue = document.getElementById("searchInput").value.toLowerCase();
+      const filtered = allEmployees.filter(emp =>
+        Object.values(emp).some(val =>
+          String(val).toLowerCase().includes(searchValue)
+        )
+      );
+
+      const start = (currentPage - 1) * rowsPerPage;
+      const paginated = filtered.slice(start, start + rowsPerPage);
+
+      let totalSalary = 0;
+
+      paginated.forEach(emp => {
+        totalSalary += Number(emp.salary);
+        const row = `<tr>
+          <td>${emp.name}</td>
+          <td>${emp.email}</td>
+          <td>${emp.position}</td>
+          <td>${emp.salary}</td>
+          <td>
+            <div class="action-buttons">
+              <button onclick="editEmployee(${emp.id}, '${emp.name}', '${emp.email}', '${emp.position}', ${emp.salary})">Edit</button>
+              <button onclick="deleteEmployee(${emp.id})">Delete</button>
+            </div>
+          </td>
+        </tr>`;
+        tbody.innerHTML += row;
+      });
+
+      document.getElementById("summary").innerText =
+        `Total Employees: ${filtered.length}, Total Salary: ₹${filtered.reduce((acc, e) => acc + Number(e.salary), 0)}`;
+
+      const totalPages = Math.ceil(filtered.length / rowsPerPage);
+      const paginationDiv = document.getElementById("pagination");
+      paginationDiv.innerHTML = "";
+
+      for (let i = 1; i <= totalPages; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = i;
+        btn.onclick = () => {
+          currentPage = i;
+          displayPage();
+        };
+        if (i === currentPage) btn.disabled = true;
+        paginationDiv.appendChild(btn);
+      }
+    }
+
+    function editEmployee(id, name, email, position, salary) {
+      editingId = id;
+      document.getElementById("name").value = name;
+      document.getElementById("email").value = email;
+      document.getElementById("position").value = position;
+      document.getElementById("salary").value = salary;
+    }
+
+    async function deleteEmployee(id) {
+      if (!confirm("Are you sure you want to delete this employee?")) return;
+
+      const response = await fetch(`http://localhost:3000/api/employees/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      const result = await response.json();
+      alert(result.message || "Deleted successfully");
+      await fetchEmployees();
+    }
+
+    function exportToCSV() {
+      const headers = ["Name", "Email", "Position", "Salary"];
+      const rows = allEmployees.map(emp => [emp.name, emp.email, emp.position, emp.salary]);
+
+      let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n"
+        + rows.map(r => r.join(",")).join("\n");
+
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "employees.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    document.getElementById("searchInput").addEventListener("input", displayPage);
+  </script>
+</body>
+
+</html>
